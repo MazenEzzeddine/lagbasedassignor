@@ -30,7 +30,7 @@
               </filters>
               <transformers>
                 <transformer>
-                  <mainClass>org.hps.KafkaConsumerExample</mainClass>
+                  <mainClass>org.hps.KafkaConsumerTestAssignor</mainClass>
                 </transformer>
               </transformers>
             </configuration>

@@ -1,90 +1,164 @@
 package org.hps;
 
 import org.apache.kafka.clients.consumer.*;
+import org.apache.kafka.clients.consumer.internals.AbstractStickyAssignor;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.Configurable;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.protocol.types.*;
+import org.apache.kafka.common.utils.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+
 import java.util.stream.Collectors;
 
 
-public class LagBasedPartitionAssignor implements ConsumerPartitionAssignor, Configurable {
+public class LagBasedPartitionAssignor extends AbstractAssignor implements Configurable {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(LagBasedPartitionAssignor.class);
 
-    private Properties consumerGroupProps;
-    private Properties metadataConsumerProps;
-    private KafkaConsumer<byte[], byte[]> metadataConsumer;
+    public LagBasedPartitionAssignor() {
 
-   // this will create a metadata consumer that would not particpate in the consumption
-    //and that is needed to to get offset and metada...
-    @Override
-    public void configure(Map<String, ?> configs) {
-
-        // Construct Properties from config map
-        consumerGroupProps = new Properties();
-        for (final Map.Entry<String, ?> prop : configs.entrySet()) {
-            consumerGroupProps.put(prop.getKey(), prop.getValue());
-        }
-
-        // group.id must be defined
-        final String groupId = consumerGroupProps.getProperty(ConsumerConfig.GROUP_ID_CONFIG);
-        if (groupId == null) {
-            throw new IllegalArgumentException(
-                    ConsumerConfig.GROUP_ID_CONFIG + " cannot be null when using "
-                            + ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG + "="
-                            + this.getClass().getName());
-        }
-
-        // Create a new consumer that can be used to get lag metadata for the consumer group
-        metadataConsumerProps = new Properties();
-        metadataConsumerProps.putAll(consumerGroupProps);
-        metadataConsumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
-        final String clientId = groupId + ".assignor";
-        metadataConsumerProps.put(ConsumerConfig.CLIENT_ID_CONFIG, clientId);
-
-        LOGGER.info(
-                "Configured LagBasedPartitionAssignor with values:\n"
-                        + "\tgroup.id = {}\n"
-                        + "\tclient.id = {}\n",
-                groupId,
-                clientId
-        );
+        LOGGER.info(" I am in the constructor and will intialize metadataconsumer");
 
     }
+
+    private Properties consumerGroupProps;
+   private Properties metadataConsumerProps;
+   private KafkaConsumer<byte[], byte[]> metadataConsumer;
+
+
+    static final String TOPIC_PARTITIONS_KEY_NAME = "previous_assignment";
+    static final String TOPIC_KEY_NAME = "topic";
+    static final String PARTITIONS_KEY_NAME = "partitions";
+    private static final String GENERATION_KEY_NAME = "generation";
+
+    static final Schema TOPIC_ASSIGNMENT = new Schema(
+            new Field(TOPIC_KEY_NAME, Type.STRING),
+            new Field(PARTITIONS_KEY_NAME, new ArrayOf(Type.INT32)));
+    static final Schema STICKY_ASSIGNOR_USER_DATA_V0 = new Schema(
+            new Field(TOPIC_PARTITIONS_KEY_NAME, new ArrayOf(TOPIC_ASSIGNMENT)));
+    private static final Schema STICKY_ASSIGNOR_USER_DATA_V1 = new Schema(
+            new Field(TOPIC_PARTITIONS_KEY_NAME, new ArrayOf(TOPIC_ASSIGNMENT)),
+            new Field(GENERATION_KEY_NAME, Type.INT32));
+
+    private List<TopicPartition> memberAssignment = null;
+    private int generation = DEFAULT_GENERATION; // consumer group generation
+
+
+
+
+    @Override
+    protected MemberData memberData(Subscription subscription) {
+        ByteBuffer userData = subscription.userData();
+        if (userData == null || !userData.hasRemaining()) {
+            return new MemberData(Collections.emptyList(), Optional.empty());
+        }
+        return deserializeTopicPartitionAssignment(userData);
+    }
+
+
+
+    private static MemberData deserializeTopicPartitionAssignment(ByteBuffer buffer) {
+        Struct struct;
+        ByteBuffer copy = buffer.duplicate();
+        try {
+            struct = STICKY_ASSIGNOR_USER_DATA_V1.read(buffer);
+        } catch (Exception e1) {
+            try {
+                // fall back to older schema
+                struct = STICKY_ASSIGNOR_USER_DATA_V0.read(copy);
+            } catch (Exception e2) {
+                // ignore the consumer's previous assignment if it cannot be parsed
+                return new MemberData(Collections.emptyList(), Optional.of(DEFAULT_GENERATION));
+            }
+        }
+
+        List<TopicPartition> partitions = new ArrayList<>();
+        for (Object structObj : struct.getArray(TOPIC_PARTITIONS_KEY_NAME)) {
+            Struct assignment = (Struct) structObj;
+            String topic = assignment.getString(TOPIC_KEY_NAME);
+            for (Object partitionObj : assignment.getArray(PARTITIONS_KEY_NAME)) {
+                Integer partition = (Integer) partitionObj;
+                partitions.add(new TopicPartition(topic, partition));
+            }
+        }
+        // make sure this is backward compatible
+        Optional<Integer> generation = struct.hasField(GENERATION_KEY_NAME) ? Optional.of(struct.getInt(GENERATION_KEY_NAME)) : Optional.empty();
+        return new MemberData(partitions, generation);
+    }
+
+
+
+        // this will create a metadata consumer that would not particpate in the consumption
+        //and that is needed to to get offset and metada...
+
 
 
     @Override
     public ByteBuffer subscriptionUserData(Set<String> topics) {
 
-        // TODO
-        // if there is something (custom data) that need to be sent
-        // along with the subscription
-        return null;
+        if (memberAssignment == null)
+            return null;
+
+        return serializeTopicPartitionAssignment(new MemberData(memberAssignment, Optional.of(generation)));
     }
+
+
+    // visible for testing
+    static ByteBuffer serializeTopicPartitionAssignment(MemberData memberData) {
+        Struct struct = new Struct(STICKY_ASSIGNOR_USER_DATA_V1);
+        List<Struct> topicAssignments = new ArrayList<>();
+        for (Map.Entry<String, List<Integer>> topicEntry : CollectionUtils.groupPartitionsByTopic(memberData.partitions).entrySet()) {
+            Struct topicAssignment = new Struct(TOPIC_ASSIGNMENT);
+            topicAssignment.set(TOPIC_KEY_NAME, topicEntry.getKey());
+            topicAssignment.set(PARTITIONS_KEY_NAME, topicEntry.getValue().toArray());
+            topicAssignments.add(topicAssignment);
+        }
+        struct.set(TOPIC_PARTITIONS_KEY_NAME, topicAssignments.toArray());
+        if (memberData.generation.isPresent())
+            struct.set(GENERATION_KEY_NAME, memberData.generation.get());
+        ByteBuffer buffer = ByteBuffer.allocate(STICKY_ASSIGNOR_USER_DATA_V1.sizeOf(struct));
+        STICKY_ASSIGNOR_USER_DATA_V1.write(buffer, struct);
+        buffer.flip();
+        return buffer;
+    }
+
 
     @Override
     public void onAssignment(Assignment assignment, ConsumerGroupMetadata metadata) {
         // TODO
         // if there is something to that is returned and to be saved across generations
+        memberAssignment = assignment.partitions();
+        this.generation = metadata.generationId();
+        LOGGER.info("Mazen : Received the assignment and my partitions are:");
+
+        for(TopicPartition tp: assignment.partitions())
+            LOGGER.info("partition : {} {}",  tp.toString(), tp.partition());
+
+
     }
 
     @Override
     public String name() {
-        return "lag";
+        return "LagAndStickyAwareAssignor";
     }
 
     @Override
     public GroupAssignment assign(Cluster metadata, GroupSubscription subscriptions) {
 
+        if (metadataConsumer == null) {
+            metadataConsumer = new KafkaConsumer<>(metadataConsumerProps);
+        }
+
         final Set<String> allSubscribedTopics = new HashSet<>();
         final Map<String, List<String>> topicSubscriptions = new HashMap<>();
         for (Map.Entry<String, Subscription> subscriptionEntry : subscriptions.groupSubscription().entrySet()) {
+            printPreviousAssignments(subscriptionEntry.getKey(),  subscriptionEntry.getValue() );
             List<String> topics = subscriptionEntry.getValue().topics();
             allSubscribedTopics.addAll(topics);
             topicSubscriptions.put(subscriptionEntry.getKey(), topics);
@@ -102,11 +176,28 @@ public class LagBasedPartitionAssignor implements ConsumerPartitionAssignor, Con
     }
 
 
+     void printPreviousAssignments( String memberid, Subscription sub) {
+
+        MemberData md =  memberData(sub);
+         LOGGER.info("Here is the previous Assignment for the member {}", memberid );
+         for(TopicPartition tp: md.partitions) {
+
+             LOGGER.info("partition  {} - {}", tp, tp.partition());
+
+
+         }
+    }
+
+
 
     static Map<String, List<TopicPartition>> assign(
             Map<String, List<TopicPartitionLag>> partitionLagPerTopic,
             Map<String, List<String>> subscriptions
     ) {
+
+
+
+
         // each memmber/consumer to its propsective assignment
         final Map<String, List<TopicPartition>> assignment = new HashMap<>();
         for (String memberId : subscriptions.keySet()) {
@@ -128,6 +219,9 @@ public class LagBasedPartitionAssignor implements ConsumerPartitionAssignor, Con
         return assignment;
 
     }
+
+
+
 
 
     private static void assignTopic(
@@ -244,9 +338,7 @@ public class LagBasedPartitionAssignor implements ConsumerPartitionAssignor, Con
             final Cluster metadata,
             final Set<String> allSubscribedTopics
     ) {
-        if (metadataConsumer == null) {
-            metadataConsumer = new KafkaConsumer<>(metadataConsumerProps);
-        }
+
        // metadataConsumer.enforceRebalance();
         final Map<String, List<TopicPartitionLag>> topicPartitionLags = new HashMap<>();
         for (String topic : allSubscribedTopics) {
@@ -333,6 +425,44 @@ public class LagBasedPartitionAssignor implements ConsumerPartitionAssignor, Con
 
         return consumersPerTopic;
 
+    }
+
+    @Override
+    public void configure(Map<String, ?> configs) {
+        // Construct Properties from config map
+        consumerGroupProps = new Properties();
+        for (final Map.Entry<String, ?> prop : configs.entrySet()) {
+            consumerGroupProps.put(prop.getKey(), prop.getValue());
+        }
+
+        // group.id must be defined
+        final String groupId = consumerGroupProps.getProperty(ConsumerConfig.GROUP_ID_CONFIG);
+        if (groupId == null) {
+            throw new IllegalArgumentException(
+                    ConsumerConfig.GROUP_ID_CONFIG + " cannot be null when using "
+                            + ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG + "="
+                            + this.getClass().getName());
+        }
+
+        // Create a new consumer that can be used to get lag metadata for the consumer group
+        metadataConsumerProps = new Properties();
+        metadataConsumerProps.putAll(consumerGroupProps);
+        metadataConsumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+        final String clientId = groupId + ".assignor";
+        metadataConsumerProps.put(ConsumerConfig.CLIENT_ID_CONFIG, clientId);
+
+        LOGGER.info(
+                "Configured LagBasedPartitionAssignor with values:\n"
+                        + "\tgroup.id = {}\n"
+                        + "\tclient.id = {}\n",
+                groupId,
+                clientId
+        );
+
+        LOGGER.info("creating the metadataconsumer inside the configure");
+
+       /* if(metadataConsumer== null)
+             metadataConsumer = new KafkaConsumer<>(metadataConsumerProps);*/
     }
 
 

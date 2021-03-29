@@ -9,8 +9,8 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.Properties;
 
-public class KafkaConsumerExample {
-    private static final Logger log = LogManager.getLogger(KafkaConsumerExample.class);
+public class KafkaConsumerTestAssignor {
+    private static final Logger log = LogManager.getLogger(KafkaConsumerTestAssignor.class);
 
     public static void main(String[] args) throws InterruptedException {
         KafkaConsumerConfig config = KafkaConsumerConfig.fromEnv();
@@ -30,6 +30,8 @@ public class KafkaConsumerExample {
         boolean commit = !Boolean.parseBoolean(config.getEnableAutoCommit());
         KafkaConsumer consumer = new KafkaConsumer(props);
         consumer.subscribe(Collections.singletonList(config.getTopic()));
+
+
 
         while (receivedMsgs < config.getMessageCount()) {
 
