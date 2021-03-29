@@ -21,6 +21,11 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
 
     private static final Logger LOGGER = LoggerFactory.getLogger(LagBasedPartitionAssignor.class);
 
+    public LagBasedPartitionAssignor() {
+
+        LOGGER.info(" I am in the constructor and will intialize metadataconsumer");
+
+    }
 
     private Properties consumerGroupProps;
    private Properties metadataConsumerProps;
@@ -145,6 +150,10 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
 
     @Override
     public GroupAssignment assign(Cluster metadata, GroupSubscription subscriptions) {
+
+        if (metadataConsumer == null) {
+            metadataConsumer = new KafkaConsumer<>(metadataConsumerProps);
+        }
 
         final Set<String> allSubscribedTopics = new HashSet<>();
         final Map<String, List<String>> topicSubscriptions = new HashMap<>();
@@ -329,9 +338,7 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
             final Cluster metadata,
             final Set<String> allSubscribedTopics
     ) {
-        if (metadataConsumer == null) {
-            metadataConsumer = new KafkaConsumer<>(metadataConsumerProps);
-        }
+
        // metadataConsumer.enforceRebalance();
         final Map<String, List<TopicPartitionLag>> topicPartitionLags = new HashMap<>();
         for (String topic : allSubscribedTopics) {
@@ -451,6 +458,11 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
                 groupId,
                 clientId
         );
+
+        LOGGER.info("creating the metadataconsumer inside the configure");
+
+       /* if(metadataConsumer== null)
+             metadataConsumer = new KafkaConsumer<>(metadataConsumerProps);*/
     }
 
 
