@@ -31,6 +31,8 @@ public class KafkaConsumerExample {
         KafkaConsumer consumer = new KafkaConsumer(props);
         consumer.subscribe(Collections.singletonList(config.getTopic()));
 
+
+
         while (receivedMsgs < config.getMessageCount()) {
 
           //  consumer.enforceRebalance();
