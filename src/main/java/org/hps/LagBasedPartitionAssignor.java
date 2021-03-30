@@ -110,20 +110,22 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
         // this will create a metadata consumer that would not particpate in the consumption
         //and that is needed to to get offset and metada...
 
-
-
-    @Override
-    public ByteBuffer subscriptionUserData(Set<String> topics) {
-
-        if (memberAssignment == null)
-            return null;
+    List<Double> computeConsumptionRate(){
 
         List<Double> rates = new ArrayList<>(memberAssignment.size());
 
         for(int i=0; i < memberAssignment.size(); i++ ) {
             rates.add(3.0);
         }
+        return rates;
+    }
 
+    @Override
+    public ByteBuffer subscriptionUserData(Set<String> topics) {
+
+        if (memberAssignment == null)
+            return null;
+        List<Double> rates = computeConsumptionRate();
 
         return serializeTopicPartitionAssignment(new MemberData(memberAssignment, rates, Optional.of(generation)));
     }
@@ -164,7 +166,6 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
 
         for(TopicPartition tp: assignment.partitions())
             LOGGER.info("partition : {} {}",  tp.toString(), tp.partition());
-
     }
 
     @Override
@@ -220,10 +221,6 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
             Map<String, List<TopicPartitionLag>> partitionLagPerTopic,
             Map<String, List<String>> subscriptions
     ) {
-
-
-
-
         // each memmber/consumer to its propsective assignment
         final Map<String, List<TopicPartition>> assignment = new HashMap<>();
         for (String memberId : subscriptions.keySet()) {
