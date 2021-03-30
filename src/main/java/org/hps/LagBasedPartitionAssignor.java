@@ -22,7 +22,6 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
     private static final Logger LOGGER = LoggerFactory.getLogger(LagBasedPartitionAssignor.class);
 
     public LagBasedPartitionAssignor() {
-
         LOGGER.info(" I am in the constructor and will intialize metadataconsumer");
 
     }
@@ -31,6 +30,8 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
     private Properties consumerGroupProps;
    private Properties metadataConsumerProps;
    private KafkaConsumer<byte[], byte[]> metadataConsumer;
+
+   private  MonitoringThread mt;
 
 
     static final String TOPIC_PARTITIONS_KEY_NAME = "previous_assignment";
@@ -111,9 +112,7 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
         //and that is needed to to get offset and metada...
 
     List<Double> computeConsumptionRate(){
-
         List<Double> rates = new ArrayList<>(memberAssignment.size());
-
         for(int i=0; i < memberAssignment.size(); i++ ) {
             rates.add(3.0);
         }
@@ -139,11 +138,11 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
             Struct topicAssignment = new Struct(TOPIC_ASSIGNMENT);
             topicAssignment.set(TOPIC_KEY_NAME, topicEntry.getKey());
             topicAssignment.set(PARTITIONS_KEY_NAME, topicEntry.getValue().toArray());
-            List<Double> rates = new ArrayList<>(topicEntry.getValue().size());
+           /* List<Double> rates = new ArrayList<>(topicEntry.getValue().size());
             for(int i = 0; i < topicEntry.getValue().size(); i++) {
                 rates.add(3.0);
-            }
-            topicAssignment.set(PARTITIONS_KEY_RATE, rates.toArray());
+            }*/
+            topicAssignment.set(PARTITIONS_KEY_RATE, memberData.rates.toArray());
             topicAssignments.add(topicAssignment);
         }
         struct.set(TOPIC_PARTITIONS_KEY_NAME, topicAssignments.toArray());
@@ -178,8 +177,9 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
 
         if (metadataConsumer == null) {
             metadataConsumer = new KafkaConsumer<>(metadataConsumerProps);
-
-            MonitoringThread mt = new MonitoringThread(metadataConsumer);
+        }
+        if(mt  == null) {
+            mt =  new MonitoringThread( metadata);
             mt.start();
         }
 
@@ -484,8 +484,8 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
 
         LOGGER.info("creating the metadataconsumer inside the configure");
 
-       /* if(metadataConsumer== null)
-             metadataConsumer = new KafkaConsumer<>(metadataConsumerProps);*/
+
+
     }
 
 
@@ -514,6 +514,68 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
         }
 
     }
+
+
+//    static class MonitoringThread1 extends TimerTask/*Thread*/ {
+//
+//        private static final Logger log = LoggerFactory.getLogger(org.hps.MonitoringThread.class);
+
+
+        // run() method contains the code that is executed by the thread.
+
+        /*  private KafkaConsumer<byte[], byte[]> consumer;*/
+/*
+    private Cluster metadata;
+*/
+
+//
+//       MonitoringThread1(/*KafkaConsumer<byte[], byte[]> */ /*, Cluster meta*/) {
+///*
+//        this.consumer = cons;
+//*/
+////        this.metadata = meta;
+//        }
+//
+//        @Override
+//        public void run() {
+//
+//            while (true) {
+//                log.info(" Mazen  Inside : " + Thread.currentThread().getName());
+//
+//       /* final List<PartitionInfo> topicPartitionInfo = metadata.partitionsForTopic("testtopic2");
+//        if (topicPartitionInfo != null && !topicPartitionInfo.isEmpty()) {
+//
+//            final List<TopicPartition> topicPartitions = topicPartitionInfo.stream().map(
+//                    (PartitionInfo p) -> new TopicPartition(p.topic(), p.partition())
+//            ).collect(Collectors.toList());
+//
+//
+//            // Get begin/end offset in each partition
+//            final Map<TopicPartition, Long> topicBeginOffsets = consumer.beginningOffsets(topicPartitions);
+//            final Map<TopicPartition, Long> topicEndOffsets = consumer.endOffsets(topicPartitions);
+//            //get last committed offset
+//            Map<TopicPartition, OffsetAndMetadata> partitionMetadata = consumer.committed(new HashSet<>(topicPartitions));
+//
+//            for (TopicPartition partition : topicPartitions) {
+//                log.info("partition {} has begin offsets {}", partition, topicBeginOffsets.get(partition));
+//                log.info("partition {} has end offsets {}", partition, topicEndOffsets.get(partition));
+//                log.info("partition {} has committed  offsets {}", partition, partitionMetadata.get(partition).offset());*/
+//
+//
+//       try {
+//           Thread.sleep(10000);
+//       } catch (Exception e) {
+//           e.printStackTrace();
+//       }
+//            }
+//
+//        }
+//
+//    }
+
+
+
+
 
 
 
