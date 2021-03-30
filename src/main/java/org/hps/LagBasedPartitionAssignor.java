@@ -27,6 +27,7 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
 
     }
 
+
     private Properties consumerGroupProps;
    private Properties metadataConsumerProps;
    private KafkaConsumer<byte[], byte[]> metadataConsumer;
@@ -35,11 +36,15 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
     static final String TOPIC_PARTITIONS_KEY_NAME = "previous_assignment";
     static final String TOPIC_KEY_NAME = "topic";
     static final String PARTITIONS_KEY_NAME = "partitions";
+    static final String PARTITIONS_KEY_RATE = "rate";
+
     private static final String GENERATION_KEY_NAME = "generation";
 
     static final Schema TOPIC_ASSIGNMENT = new Schema(
             new Field(TOPIC_KEY_NAME, Type.STRING),
-            new Field(PARTITIONS_KEY_NAME, new ArrayOf(Type.INT32)));
+            new Field(PARTITIONS_KEY_NAME, new ArrayOf(Type.INT32)),
+            new Field(PARTITIONS_KEY_RATE, new ArrayOf(Type.INT32))
+    );
     static final Schema STICKY_ASSIGNOR_USER_DATA_V0 = new Schema(
             new Field(TOPIC_PARTITIONS_KEY_NAME, new ArrayOf(TOPIC_ASSIGNMENT)));
     private static final Schema STICKY_ASSIGNOR_USER_DATA_V1 = new Schema(
@@ -56,7 +61,7 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
     protected MemberData memberData(Subscription subscription) {
         ByteBuffer userData = subscription.userData();
         if (userData == null || !userData.hasRemaining()) {
-            return new MemberData(Collections.emptyList(), Optional.empty());
+            return new MemberData(Collections.emptyList(), Collections.emptyList(), Optional.empty());
         }
         return deserializeTopicPartitionAssignment(userData);
     }
@@ -74,11 +79,13 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
                 struct = STICKY_ASSIGNOR_USER_DATA_V0.read(copy);
             } catch (Exception e2) {
                 // ignore the consumer's previous assignment if it cannot be parsed
-                return new MemberData(Collections.emptyList(), Optional.of(DEFAULT_GENERATION));
+                return new MemberData(Collections.emptyList(),Collections.emptyList(), Optional.of(DEFAULT_GENERATION));
             }
         }
 
         List<TopicPartition> partitions = new ArrayList<>();
+        List<Integer> rates = new ArrayList<>();
+
         for (Object structObj : struct.getArray(TOPIC_PARTITIONS_KEY_NAME)) {
             Struct assignment = (Struct) structObj;
             String topic = assignment.getString(TOPIC_KEY_NAME);
@@ -86,10 +93,16 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
                 Integer partition = (Integer) partitionObj;
                 partitions.add(new TopicPartition(topic, partition));
             }
+
+            for (Object partitionObj : assignment.getArray(PARTITIONS_KEY_RATE)) {
+                Integer rate = (Integer) partitionObj;
+                rates.add(rate);
+                LOGGER.info( "rate is {}", rate);
+            }
         }
         // make sure this is backward compatible
         Optional<Integer> generation = struct.hasField(GENERATION_KEY_NAME) ? Optional.of(struct.getInt(GENERATION_KEY_NAME)) : Optional.empty();
-        return new MemberData(partitions, generation);
+        return new MemberData(partitions, rates, generation);
     }
 
 
@@ -105,7 +118,14 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
         if (memberAssignment == null)
             return null;
 
-        return serializeTopicPartitionAssignment(new MemberData(memberAssignment, Optional.of(generation)));
+        List<Integer> rates = new ArrayList<>(memberAssignment.size());
+
+        for(int i=0; i < memberAssignment.size(); i++ ) {
+            rates.add(3);
+        }
+
+
+        return serializeTopicPartitionAssignment(new MemberData(memberAssignment, rates, Optional.of(generation)));
     }
 
 
@@ -117,6 +137,11 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
             Struct topicAssignment = new Struct(TOPIC_ASSIGNMENT);
             topicAssignment.set(TOPIC_KEY_NAME, topicEntry.getKey());
             topicAssignment.set(PARTITIONS_KEY_NAME, topicEntry.getValue().toArray());
+            List<Integer> rates = new ArrayList<>(topicEntry.getValue().size());
+            for(int i = 0; i < topicEntry.getValue().size(); i++) {
+                rates.add(3);
+            }
+            topicAssignment.set(PARTITIONS_KEY_RATE, rates.toArray());
             topicAssignments.add(topicAssignment);
         }
         struct.set(TOPIC_PARTITIONS_KEY_NAME, topicAssignments.toArray());
@@ -140,7 +165,6 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
         for(TopicPartition tp: assignment.partitions())
             LOGGER.info("partition : {} {}",  tp.toString(), tp.partition());
 
-
     }
 
     @Override
@@ -153,6 +177,9 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
 
         if (metadataConsumer == null) {
             metadataConsumer = new KafkaConsumer<>(metadataConsumerProps);
+
+            MonitoringThread mt = new MonitoringThread(metadataConsumer);
+            mt.start();
         }
 
         final Set<String> allSubscribedTopics = new HashSet<>();
@@ -183,7 +210,6 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
          for(TopicPartition tp: md.partitions) {
 
              LOGGER.info("partition  {} - {}", tp, tp.partition());
-
 
          }
     }
@@ -492,4 +518,12 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
 
     }
 
+
+
+
+
+
+
 }
+
+

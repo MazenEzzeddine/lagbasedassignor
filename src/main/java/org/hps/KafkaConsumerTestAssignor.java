@@ -61,3 +61,7 @@ public class KafkaConsumerTestAssignor {
         log.info("Received {} messages", receivedMsgs);
     }
 }
+
+
+
+

@@ -28,17 +28,20 @@ public abstract class AbstractAssignor implements ConsumerPartitionAssignor {
     public static final class MemberData {
         public final List<TopicPartition> partitions;
         public final Optional<Integer> generation;
+        public final List<Integer> rates;
 
-        public MemberData(List<TopicPartition> partitions, Optional<Integer> generation) {
+
+        public MemberData(List<TopicPartition> partitions, List<Integer> rates,  Optional<Integer> generation) {
             this.partitions = partitions;
             this.generation = generation;
+            this.rates = rates;
         }
     }
 
     abstract protected MemberData memberData(Subscription subscription);
 
 
-    public static class MemberInfo implements Comparable<AbstractPartitionAssignor.MemberInfo> {
+    public static class MemberInfo implements Comparable<MemberInfo> {
         public final String memberId;
         public final Optional<String> groupInstanceId;
 
@@ -48,7 +51,7 @@ public abstract class AbstractAssignor implements ConsumerPartitionAssignor {
         }
 
         @Override
-        public int compareTo(AbstractPartitionAssignor.MemberInfo otherMemberInfo) {
+        public int compareTo(MemberInfo otherMemberInfo) {
             if (this.groupInstanceId.isPresent() &&
                     otherMemberInfo.groupInstanceId.isPresent()) {
                 return this.groupInstanceId.get()
@@ -64,7 +67,7 @@ public abstract class AbstractAssignor implements ConsumerPartitionAssignor {
 
         @Override
         public boolean equals(Object o) {
-            return o instanceof AbstractPartitionAssignor.MemberInfo && this.memberId.equals(((AbstractPartitionAssignor.MemberInfo) o).memberId);
+            return o instanceof MemberInfo && this.memberId.equals(((MemberInfo) o).memberId);
         }
 
         /**
