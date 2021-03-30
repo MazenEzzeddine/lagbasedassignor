@@ -43,7 +43,7 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
     static final Schema TOPIC_ASSIGNMENT = new Schema(
             new Field(TOPIC_KEY_NAME, Type.STRING),
             new Field(PARTITIONS_KEY_NAME, new ArrayOf(Type.INT32)),
-            new Field(PARTITIONS_KEY_RATE, new ArrayOf(Type.INT32))
+            new Field(PARTITIONS_KEY_RATE, new ArrayOf(Type.FLOAT64))
     );
     static final Schema STICKY_ASSIGNOR_USER_DATA_V0 = new Schema(
             new Field(TOPIC_PARTITIONS_KEY_NAME, new ArrayOf(TOPIC_ASSIGNMENT)));
@@ -84,7 +84,7 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
         }
 
         List<TopicPartition> partitions = new ArrayList<>();
-        List<Integer> rates = new ArrayList<>();
+        List<Double> rates = new ArrayList<>();
 
         for (Object structObj : struct.getArray(TOPIC_PARTITIONS_KEY_NAME)) {
             Struct assignment = (Struct) structObj;
@@ -95,7 +95,7 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
             }
 
             for (Object partitionObj : assignment.getArray(PARTITIONS_KEY_RATE)) {
-                Integer rate = (Integer) partitionObj;
+                Double rate = (Double) partitionObj;
                 rates.add(rate);
                 LOGGER.info( "rate is {}", rate);
             }
@@ -118,10 +118,10 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
         if (memberAssignment == null)
             return null;
 
-        List<Integer> rates = new ArrayList<>(memberAssignment.size());
+        List<Double> rates = new ArrayList<>(memberAssignment.size());
 
         for(int i=0; i < memberAssignment.size(); i++ ) {
-            rates.add(3);
+            rates.add(3.0);
         }
 
 
@@ -137,9 +137,9 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
             Struct topicAssignment = new Struct(TOPIC_ASSIGNMENT);
             topicAssignment.set(TOPIC_KEY_NAME, topicEntry.getKey());
             topicAssignment.set(PARTITIONS_KEY_NAME, topicEntry.getValue().toArray());
-            List<Integer> rates = new ArrayList<>(topicEntry.getValue().size());
+            List<Double> rates = new ArrayList<>(topicEntry.getValue().size());
             for(int i = 0; i < topicEntry.getValue().size(); i++) {
-                rates.add(3);
+                rates.add(3.0);
             }
             topicAssignment.set(PARTITIONS_KEY_RATE, rates.toArray());
             topicAssignments.add(topicAssignment);
