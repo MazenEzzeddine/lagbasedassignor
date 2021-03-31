@@ -26,9 +26,20 @@ public class MonitoringThread extends Thread implements Configurable {
 
     private Properties consumerGroupProps;
     private Properties metadataConsumerProps;
+
+     Map<TopicPartition, Long> currentPartitionToCommittedOffset;
+     Map<TopicPartition, Long> previousPartitionToCommittedOffset;
+
+     Map<TopicPartition, Long> previousPartitionToLastOffset;
+     Map<TopicPartition, Long> currentPartitionToLastOffset;
+
+    boolean firstIteration;
+
+
     MonitoringThread(Cluster meta) {
 
         this.metadata = meta;
+        firstIteration = true;
     }
 
     @Override
@@ -36,12 +47,14 @@ public class MonitoringThread extends Thread implements Configurable {
 
         createDirectConsumer();
 
+       currentPartitionToCommittedOffset = new HashMap<TopicPartition, Long>();
+        previousPartitionToCommittedOffset = new HashMap<>();
+
+      previousPartitionToLastOffset = new HashMap<>();
+   currentPartitionToLastOffset = new HashMap<>();
+
 
         while (true) {
-
-
-            log.info(" Mazen Inside : " + Thread.currentThread().getName());
-
 
             final List<PartitionInfo> topicPartitionInfo = metadata.partitionsForTopic("testtopic2");
             if (topicPartitionInfo != null && !topicPartitionInfo.isEmpty()) {
@@ -57,18 +70,80 @@ public class MonitoringThread extends Thread implements Configurable {
                 //get last committed offset
                 Map<TopicPartition, OffsetAndMetadata> partitionMetadata = metadataConsumer.committed(new HashSet<>(topicPartitions));
 
+//                for (TopicPartition partition : topicPartitions) {
+//                    currentPartitionToCommittedOffset.put(partition, 0L);
+//                    previousPartitionToCommittedOffset.put(partition, 0L);
+//                    previousPartitionToLastOffset.put(partition, 0L);
+//                    currentPartitionToLastOffset.put(partition, 0L);
+//
+//
+//                }
+
+
                 for (TopicPartition partition : topicPartitions) {
                     log.info("partition {} has begin offsets {}", partition, topicBeginOffsets.get(partition));
                     log.info("partition {} has end offsets {}", partition, topicEndOffsets.get(partition));
                     log.info("partition {} has committed  offsets {}", partition, partitionMetadata.get(partition).offset());
+
+
+                    /////////////////////////////////////////////////////////////////
+                    if (firstIteration) {
+
+                      currentPartitionToCommittedOffset.put(partition, partitionMetadata.get(partition).offset());
+
+                       currentPartitionToLastOffset.put(partition, topicEndOffsets.get(partition));
+                    } else {
+
+                      previousPartitionToCommittedOffset.put(partition,  currentPartitionToCommittedOffset.get(partition));
+                     previousPartitionToLastOffset.put(partition,  currentPartitionToLastOffset.get(partition));
+
+                       currentPartitionToCommittedOffset.put(partition, partitionMetadata.get(partition).offset());
+
+                       currentPartitionToLastOffset.put(partition, topicEndOffsets.get(partition));
+
+
+                        // print thr rates ...
+
+                        log.info("For partition {} previousCommittedOffsets = {}", partition,
+                                previousPartitionToCommittedOffset.get(partition));
+
+                        log.info(" For partition {} currentCommittedOffsets = {}", partition,
+                                currentPartitionToCommittedOffset.get(partition));
+
+                        //log latest produced offset
+                        log.info("For partition {} previousEndOffsets = {}", partition,
+                                previousPartitionToLastOffset.get(partition));
+
+                        log.info(" for partition {} currentEndOffsets = {}", partition,
+                                currentPartitionToLastOffset.get(partition));
+
+                        log.info(" for partition {} consumer rate = {}", partition,
+                                (float) (currentPartitionToCommittedOffset.get(partition) -
+                                        previousPartitionToCommittedOffset.get(partition))/20);
+
+
+                        log.info(" for partition {} arrival rate = {}", partition,
+                                (float) (currentPartitionToLastOffset.get(partition) -
+                                        previousPartitionToLastOffset.get(partition))/20);
+
+                    }
+
+
+
+                    /////////////////////////////////////////////////////////////
+
+
+
                 }
                 try {
-                    Thread.sleep(10000);
-                    log.info(" Mazen Inside : " + metadataConsumer.toString());
-
+                    log.info("  Inside Monitoring : " + Thread.currentThread().getName());
+                    Thread.sleep(20000);
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
+
+                firstIteration = false;
+
 
             }
         }
@@ -78,7 +153,7 @@ public class MonitoringThread extends Thread implements Configurable {
     public void createDirectConsumer(){
         Properties props = new Properties();
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "my-cluster-kafka-bootstrap:9092");
-        props.put(ConsumerConfig.GROUP_ID_CONFIG, "testgroup2");
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, "lagsticky");
 
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
