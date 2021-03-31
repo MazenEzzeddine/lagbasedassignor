@@ -22,24 +22,30 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
     private static final Logger LOGGER = LoggerFactory.getLogger(LagBasedPartitionAssignor.class);
 
     public LagBasedPartitionAssignor() {
-
         LOGGER.info(" I am in the constructor and will intialize metadataconsumer");
 
     }
+
 
     private Properties consumerGroupProps;
    private Properties metadataConsumerProps;
    private KafkaConsumer<byte[], byte[]> metadataConsumer;
 
+   private  MonitoringThread mt;
+
 
     static final String TOPIC_PARTITIONS_KEY_NAME = "previous_assignment";
     static final String TOPIC_KEY_NAME = "topic";
     static final String PARTITIONS_KEY_NAME = "partitions";
+    static final String PARTITIONS_KEY_RATE = "rate";
+
     private static final String GENERATION_KEY_NAME = "generation";
 
     static final Schema TOPIC_ASSIGNMENT = new Schema(
             new Field(TOPIC_KEY_NAME, Type.STRING),
-            new Field(PARTITIONS_KEY_NAME, new ArrayOf(Type.INT32)));
+            new Field(PARTITIONS_KEY_NAME, new ArrayOf(Type.INT32)),
+            new Field(PARTITIONS_KEY_RATE, new ArrayOf(Type.FLOAT64))
+    );
     static final Schema STICKY_ASSIGNOR_USER_DATA_V0 = new Schema(
             new Field(TOPIC_PARTITIONS_KEY_NAME, new ArrayOf(TOPIC_ASSIGNMENT)));
     private static final Schema STICKY_ASSIGNOR_USER_DATA_V1 = new Schema(
@@ -56,7 +62,7 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
     protected MemberData memberData(Subscription subscription) {
         ByteBuffer userData = subscription.userData();
         if (userData == null || !userData.hasRemaining()) {
-            return new MemberData(Collections.emptyList(), Optional.empty());
+            return new MemberData(Collections.emptyList(), Collections.emptyList(), Optional.empty());
         }
         return deserializeTopicPartitionAssignment(userData);
     }
@@ -74,11 +80,13 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
                 struct = STICKY_ASSIGNOR_USER_DATA_V0.read(copy);
             } catch (Exception e2) {
                 // ignore the consumer's previous assignment if it cannot be parsed
-                return new MemberData(Collections.emptyList(), Optional.of(DEFAULT_GENERATION));
+                return new MemberData(Collections.emptyList(),Collections.emptyList(), Optional.of(DEFAULT_GENERATION));
             }
         }
 
         List<TopicPartition> partitions = new ArrayList<>();
+        List<Double> rates = new ArrayList<>();
+
         for (Object structObj : struct.getArray(TOPIC_PARTITIONS_KEY_NAME)) {
             Struct assignment = (Struct) structObj;
             String topic = assignment.getString(TOPIC_KEY_NAME);
@@ -86,10 +94,16 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
                 Integer partition = (Integer) partitionObj;
                 partitions.add(new TopicPartition(topic, partition));
             }
+
+            for (Object partitionObj : assignment.getArray(PARTITIONS_KEY_RATE)) {
+                Double rate = (Double) partitionObj;
+                rates.add(rate);
+                LOGGER.info( "rate is {}", rate);
+            }
         }
         // make sure this is backward compatible
         Optional<Integer> generation = struct.hasField(GENERATION_KEY_NAME) ? Optional.of(struct.getInt(GENERATION_KEY_NAME)) : Optional.empty();
-        return new MemberData(partitions, generation);
+        return new MemberData(partitions, rates, generation);
     }
 
 
@@ -97,15 +111,22 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
         // this will create a metadata consumer that would not particpate in the consumption
         //and that is needed to to get offset and metada...
 
-
+    List<Double> computeConsumptionRate(){
+        List<Double> rates = new ArrayList<>(memberAssignment.size());
+        for(int i=0; i < memberAssignment.size(); i++ ) {
+            rates.add(3.0);
+        }
+        return rates;
+    }
 
     @Override
     public ByteBuffer subscriptionUserData(Set<String> topics) {
 
         if (memberAssignment == null)
             return null;
+        List<Double> rates = computeConsumptionRate();
 
-        return serializeTopicPartitionAssignment(new MemberData(memberAssignment, Optional.of(generation)));
+        return serializeTopicPartitionAssignment(new MemberData(memberAssignment, rates, Optional.of(generation)));
     }
 
 
@@ -117,6 +138,11 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
             Struct topicAssignment = new Struct(TOPIC_ASSIGNMENT);
             topicAssignment.set(TOPIC_KEY_NAME, topicEntry.getKey());
             topicAssignment.set(PARTITIONS_KEY_NAME, topicEntry.getValue().toArray());
+           /* List<Double> rates = new ArrayList<>(topicEntry.getValue().size());
+            for(int i = 0; i < topicEntry.getValue().size(); i++) {
+                rates.add(3.0);
+            }*/
+            topicAssignment.set(PARTITIONS_KEY_RATE, memberData.rates.toArray());
             topicAssignments.add(topicAssignment);
         }
         struct.set(TOPIC_PARTITIONS_KEY_NAME, topicAssignments.toArray());
@@ -139,8 +165,6 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
 
         for(TopicPartition tp: assignment.partitions())
             LOGGER.info("partition : {} {}",  tp.toString(), tp.partition());
-
-
     }
 
     @Override
@@ -153,6 +177,10 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
 
         if (metadataConsumer == null) {
             metadataConsumer = new KafkaConsumer<>(metadataConsumerProps);
+        }
+        if(mt  == null) {
+            mt =  new MonitoringThread( metadata);
+            mt.start();
         }
 
         final Set<String> allSubscribedTopics = new HashSet<>();
@@ -184,7 +212,6 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
 
              LOGGER.info("partition  {} - {}", tp, tp.partition());
 
-
          }
     }
 
@@ -194,10 +221,6 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
             Map<String, List<TopicPartitionLag>> partitionLagPerTopic,
             Map<String, List<String>> subscriptions
     ) {
-
-
-
-
         // each memmber/consumer to its propsective assignment
         final Map<String, List<TopicPartition>> assignment = new HashMap<>();
         for (String memberId : subscriptions.keySet()) {
@@ -287,9 +310,16 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
                             }
                     )
                     .getKey();
-            assignment.get(memberId).add(new TopicPartition(partition.getTopic(), partition.getPartition()));
+
+            TopicPartition p =  new TopicPartition(partition.getTopic(), partition.getPartition());
+            assignment.get(memberId).add(p);
             consumerTotalLags.put(memberId, consumerTotalLags.getOrDefault(memberId, 0L) + partition.getLag());
             consumerTotalPartitions.put(memberId, consumerTotalPartitions.getOrDefault(memberId, 0) + 1);
+             if(!MonitoringThread.firstIteration) {
+                 LOGGER.info("Partition P {} has the following arrival rate {}", p, MonitoringThread.partitionArrivalrate.get(p));
+                 LOGGER.info("Partition P {} has the following consumption rate {}", p, MonitoringThread.partitionArrivalrate.get(p));
+             }
+
 
             LOGGER.info(
                     "Assigned partition {}-{} to consumer {}.  partition_lag={}, consumer_current_total_lag={}",
@@ -461,8 +491,8 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
 
         LOGGER.info("creating the metadataconsumer inside the configure");
 
-       /* if(metadataConsumer== null)
-             metadataConsumer = new KafkaConsumer<>(metadataConsumerProps);*/
+
+
     }
 
 
@@ -492,4 +522,74 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
 
     }
 
+
+//    static class MonitoringThread1 extends TimerTask/*Thread*/ {
+//
+//        private static final Logger log = LoggerFactory.getLogger(org.hps.MonitoringThread.class);
+
+
+        // run() method contains the code that is executed by the thread.
+
+        /*  private KafkaConsumer<byte[], byte[]> consumer;*/
+/*
+    private Cluster metadata;
+*/
+
+//
+//       MonitoringThread1(/*KafkaConsumer<byte[], byte[]> */ /*, Cluster meta*/) {
+///*
+//        this.consumer = cons;
+//*/
+////        this.metadata = meta;
+//        }
+//
+//        @Override
+//        public void run() {
+//
+//            while (true) {
+//                log.info(" Mazen  Inside : " + Thread.currentThread().getName());
+//
+//       /* final List<PartitionInfo> topicPartitionInfo = metadata.partitionsForTopic("testtopic2");
+//        if (topicPartitionInfo != null && !topicPartitionInfo.isEmpty()) {
+//
+//            final List<TopicPartition> topicPartitions = topicPartitionInfo.stream().map(
+//                    (PartitionInfo p) -> new TopicPartition(p.topic(), p.partition())
+//            ).collect(Collectors.toList());
+//
+//
+//            // Get begin/end offset in each partition
+//            final Map<TopicPartition, Long> topicBeginOffsets = consumer.beginningOffsets(topicPartitions);
+//            final Map<TopicPartition, Long> topicEndOffsets = consumer.endOffsets(topicPartitions);
+//            //get last committed offset
+//            Map<TopicPartition, OffsetAndMetadata> partitionMetadata = consumer.committed(new HashSet<>(topicPartitions));
+//
+//            for (TopicPartition partition : topicPartitions) {
+//                log.info("partition {} has begin offsets {}", partition, topicBeginOffsets.get(partition));
+//                log.info("partition {} has end offsets {}", partition, topicEndOffsets.get(partition));
+//                log.info("partition {} has committed  offsets {}", partition, partitionMetadata.get(partition).offset());*/
+//
+//
+//       try {
+//           Thread.sleep(10000);
+//       } catch (Exception e) {
+//           e.printStackTrace();
+//       }
+//            }
+//
+//        }
+//
+//    }
+
+
+
+
+
+
+
+
+
+
+
 }
+
+
