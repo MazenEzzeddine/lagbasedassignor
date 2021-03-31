@@ -310,9 +310,16 @@ public class LagBasedPartitionAssignor extends AbstractAssignor implements Confi
                             }
                     )
                     .getKey();
-            assignment.get(memberId).add(new TopicPartition(partition.getTopic(), partition.getPartition()));
+
+            TopicPartition p =  new TopicPartition(partition.getTopic(), partition.getPartition());
+            assignment.get(memberId).add(p);
             consumerTotalLags.put(memberId, consumerTotalLags.getOrDefault(memberId, 0L) + partition.getLag());
             consumerTotalPartitions.put(memberId, consumerTotalPartitions.getOrDefault(memberId, 0) + 1);
+             if(!MonitoringThread.firstIteration) {
+                 LOGGER.info("Partition P {} has the following arrival rate {}", p, MonitoringThread.partitionArrivalrate.get(p));
+                 LOGGER.info("Partition P {} has the following consumption rate {}", p, MonitoringThread.partitionArrivalrate.get(p));
+             }
+
 
             LOGGER.info(
                     "Assigned partition {}-{} to consumer {}.  partition_lag={}, consumer_current_total_lag={}",

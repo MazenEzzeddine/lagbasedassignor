@@ -27,13 +27,18 @@ public class MonitoringThread extends Thread implements Configurable {
     private Properties consumerGroupProps;
     private Properties metadataConsumerProps;
 
-     Map<TopicPartition, Long> currentPartitionToCommittedOffset;
-     Map<TopicPartition, Long> previousPartitionToCommittedOffset;
+    public static  Map<TopicPartition, Long> currentPartitionToCommittedOffset;
+    public static Map<TopicPartition, Long> previousPartitionToCommittedOffset;
 
-     Map<TopicPartition, Long> previousPartitionToLastOffset;
-     Map<TopicPartition, Long> currentPartitionToLastOffset;
+    public static Map<TopicPartition, Long> previousPartitionToLastOffset;
+    public static Map<TopicPartition, Long> currentPartitionToLastOffset;
 
-    boolean firstIteration;
+    public static Map<TopicPartition, Float> partitionArrivalrate;
+    public static Map<TopicPartition, Float> partitionConsumptionRate;
+
+
+
+    public static boolean firstIteration;
 
 
     MonitoringThread(Cluster meta) {
@@ -42,16 +47,23 @@ public class MonitoringThread extends Thread implements Configurable {
         firstIteration = true;
     }
 
+
+
+
+
     @Override
     public void run() {
 
         createDirectConsumer();
 
-       currentPartitionToCommittedOffset = new HashMap<TopicPartition, Long>();
+        currentPartitionToCommittedOffset = new HashMap<TopicPartition, Long>();
         previousPartitionToCommittedOffset = new HashMap<>();
 
-      previousPartitionToLastOffset = new HashMap<>();
-   currentPartitionToLastOffset = new HashMap<>();
+        previousPartitionToLastOffset = new HashMap<>();
+        currentPartitionToLastOffset = new HashMap<>();
+
+        partitionArrivalrate = new HashMap<>();
+        partitionConsumptionRate = new HashMap<>();
 
 
         while (true) {
@@ -89,17 +101,17 @@ public class MonitoringThread extends Thread implements Configurable {
                     /////////////////////////////////////////////////////////////////
                     if (firstIteration) {
 
-                      currentPartitionToCommittedOffset.put(partition, partitionMetadata.get(partition).offset());
+                        currentPartitionToCommittedOffset.put(partition, partitionMetadata.get(partition).offset());
 
-                       currentPartitionToLastOffset.put(partition, topicEndOffsets.get(partition));
+                        currentPartitionToLastOffset.put(partition, topicEndOffsets.get(partition));
                     } else {
 
-                      previousPartitionToCommittedOffset.put(partition,  currentPartitionToCommittedOffset.get(partition));
-                     previousPartitionToLastOffset.put(partition,  currentPartitionToLastOffset.get(partition));
+                        previousPartitionToCommittedOffset.put(partition,  currentPartitionToCommittedOffset.get(partition));
+                        previousPartitionToLastOffset.put(partition,  currentPartitionToLastOffset.get(partition));
 
-                       currentPartitionToCommittedOffset.put(partition, partitionMetadata.get(partition).offset());
+                        currentPartitionToCommittedOffset.put(partition, partitionMetadata.get(partition).offset());
 
-                       currentPartitionToLastOffset.put(partition, topicEndOffsets.get(partition));
+                        currentPartitionToLastOffset.put(partition, topicEndOffsets.get(partition));
 
 
                         // print thr rates ...
@@ -117,22 +129,25 @@ public class MonitoringThread extends Thread implements Configurable {
                         log.info(" for partition {} currentEndOffsets = {}", partition,
                                 currentPartitionToLastOffset.get(partition));
 
-                        log.info(" for partition {} consumer rate = {}", partition,
-                                (float) (currentPartitionToCommittedOffset.get(partition) -
-                                        previousPartitionToCommittedOffset.get(partition))/20);
+                        partitionArrivalrate.put(partition, (float) (currentPartitionToLastOffset.get(partition) -
+                                previousPartitionToLastOffset.get(partition))/20);
+
+                        partitionConsumptionRate.put(partition, (float) (currentPartitionToCommittedOffset.get(partition) -
+                                previousPartitionToCommittedOffset.get(partition))/20);
 
 
-                        log.info(" for partition {} arrival rate = {}", partition,
-                                (float) (currentPartitionToLastOffset.get(partition) -
-                                        previousPartitionToLastOffset.get(partition))/20);
+
+                        log.info(" For partition {} consumer rate = {}", partition,
+                                partitionArrivalrate.get(partition)
+                        );
+
+
+                        log.info(" For partition {} arrival rate = {}",
+                                partition, partitionConsumptionRate.get(partition));
 
                     }
 
-
-
                     /////////////////////////////////////////////////////////////
-
-
 
                 }
                 try {
