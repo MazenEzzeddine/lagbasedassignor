@@ -24,13 +24,9 @@ public class KafkaConsumerTestAssignor {
         props.put(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG, LagBasedPartitionAssignor.class.getName());
         //props.put(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG, CooperativeStickyAssignor.class.getName());
 
-
-
-
         boolean commit = !Boolean.parseBoolean(config.getEnableAutoCommit());
         KafkaConsumer consumer = new KafkaConsumer(props);
         consumer.subscribe(Collections.singletonList(config.getTopic()));
-
 
 
         while (receivedMsgs < config.getMessageCount()) {

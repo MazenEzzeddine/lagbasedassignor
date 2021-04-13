@@ -1,8 +1,6 @@
 package org.hps;
 
 import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor;
-import org.apache.kafka.clients.consumer.internals.AbstractPartitionAssignor;
-import org.apache.kafka.clients.consumer.internals.AbstractStickyAssignor;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
@@ -11,9 +9,7 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 
 public abstract class AbstractAssignor implements ConsumerPartitionAssignor {
-
     private static final Logger log = LoggerFactory.getLogger(AbstractAssignor.class);
-
     public static final int DEFAULT_GENERATION = -1;
 
 
@@ -22,14 +18,10 @@ public abstract class AbstractAssignor implements ConsumerPartitionAssignor {
 
     public abstract GroupAssignment assign(Cluster metadata, GroupSubscription groupSubscription);
 
-
-
-
     public static final class MemberData {
         public final List<TopicPartition> partitions;
         public final Optional<Integer> generation;
         public final List<Double> rates;
-
 
         public MemberData(List<TopicPartition> partitions, List<Double> rates,  Optional<Integer> generation) {
             this.partitions = partitions;
@@ -39,7 +31,6 @@ public abstract class AbstractAssignor implements ConsumerPartitionAssignor {
     }
 
     abstract protected MemberData memberData(Subscription subscription);
-
 
     public static class MemberInfo implements Comparable<MemberInfo> {
         public final String memberId;
@@ -70,10 +61,7 @@ public abstract class AbstractAssignor implements ConsumerPartitionAssignor {
             return o instanceof MemberInfo && this.memberId.equals(((MemberInfo) o).memberId);
         }
 
-        /**
-         * We could just use member.id to be the hashcode, since it's unique
-         * across the group.
-         */
+
         @Override
         public int hashCode() {
             return memberId.hashCode();
